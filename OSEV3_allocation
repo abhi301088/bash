@@ -1,0 +1,150 @@
+#!/bin/bash
+#Script to create OSE shares in bulk
+
+echo "enter cluster name nascf003, nascls005, nascf001 or nascsl006: "
+read cluster
+
+if [ "$cluster" == "nascf003" ];
+then
+        vserver="nasv0038"
+
+elif [ "$cluster" == "nascf001" ];
+then
+        vserver="nasv0012"
+
+elif [ "$cluster" == "nascls006" ];
+then
+        vserver="nasv9042"
+
+elif [ "$cluster" == "nascls005" ];
+then
+        vserver="nasv9012"
+
+elif [ "$cluster" == "nascf002" ];
+then
+        vserver="nasv0024"
+else
+        echo " enter a valid cluster name"
+        exit
+fi
+
+echo "Enter the name of the volume: "
+read volume
+
+vol_junction="/$volume"
+
+echo "Enter PV start number: "
+read pv_start
+
+echo "enter number of 1GB shares:"
+read one_gig
+echo "enter number of 5GB shares:"
+read five_gig
+echo "enter number of 10GB shares:"
+read ten_gig
+echo "enter number of 50GB shares:"
+read fifty_gig
+
+total_qtree=`expr $one_gig + $five_gig + $ten_gig + $fifty_gig` 
+echo $total_qtree
+if [ $total_qtree -gt 100 ] || [ $total_qtree -le 0 ]
+then
+        echo "total number of qtrees per volume should be between 0 and 100"
+        echo "Ending script, nothing created..."
+        exit
+fi
+
+#flag=`ssh -n admin@$cluster vserver security file-directory policy task show -vserver $vserver -policy-name admin_dacl_pl | head -2 | tail -1`
+
+#if [ -n "$flag" ];
+#then
+#       echo "There are active DACL jobs in this policy .... ending without creting shares"
+#        exit
+#fi
+
+
+echo "enter hosting aggregate name: "
+read aggregate
+
+echo "enter netgroup name:"
+read netgroup
+
+echo "creating $volume"
+ssh -n admin@$cluster vol create -volume $volume -aggregate $aggregate -size 10T -vserver $vserver  -space-guarantee none -percent-snapshot-space 0 -language en_US
+
+echo "mounting volume $volume"
+ssh -n admin@$cluster volume mount -vserver $vserver -volume $volume -junction-path $vol_junction -active true
+
+echo "setting DACL on the newly created volume:"
+
+ssh -n admin@$cluster vserver security file-directory policy task add -vserver $vserver -policy-name admin_dacl_pl -path $vol_junction -security-type ntfs -ntfs-mode replace -ntfs-sd admin_sd -index-num 1
+
+ssh -n admin@$cluster vserver security file-directory apply -vserver $vserver -policy-name admin_dacl_pl
+
+ssh -n admin@$cluster vserver security file-directory policy task remove -vserver $vserver -policy-name admin_dacl_pl -path $vol_junction
+
+sleep 10
+
+echo `ssh -n admin@$cluster vserver security file-directory policy task remove -vserver $vserver -policy-name admin_dacl_pl -path $vol_junction`
+
+
+echo "creating qtrees. "
+
+
+count=$pv_start
+limit=`expr $count + $one_gig`
+for (( iter=$count; iter<$limit; iter++ ))
+do
+        echo "pv0$iter"" quota 1GB."
+        ssh -n admin@$cluster qtree create -vserver $vserver -volume $volume -qtree "pv0$iter" -security-style unix
+        ssh -n admin@$cluster quota policy rule create -vserver $vserver -policy-name  "q_""$vserver""_pl" -volume $volume -type tree -target "pv0$iter" -disk-limit 1GB -soft-disk-limit 0.9GB
+done
+
+
+
+count=$limit
+limit=`expr $count + $five_gig`
+for (( iter=$count; iter<$limit; iter++ ))
+do
+        echo "pv0$iter"" quota 5GB."
+        ssh -n admin@$cluster qtree create -vserver $vserver -volume $volume -qtree "pv0$iter" -security-style unix
+        ssh -n admin@$cluster quota policy rule create -vserver $vserver -policy-name  "q_""$vserver""_pl" -volume $volume -type tree -target "pv0$iter" -disk-limit 5GB -soft-disk-limit 4.5GB
+done
+
+
+count=$limit
+limit=`expr $count + $ten_gig`
+for (( iter=$count; iter<$limit; iter++ ))
+do
+        echo "pv0$iter"" quota 10GB."
+        ssh -n admin@$cluster qtree create -vserver $vserver -volume $volume -qtree "pv0$iter" -security-style unix
+        ssh -n admin@$cluster quota policy rule create -vserver $vserver -policy-name  "q_""$vserver""_pl" -volume $volume -type tree -target "pv0$iter" -disk-limit 10GB -soft-disk-limit 4.5GB
+done
+
+
+
+count=$limit
+limit=`expr $count + $fifty_gig`
+for (( iter=$count; iter<$limit; iter++ ))
+do
+        echo "pv0$iter"" quota 50GB."
+        ssh -n admin@$cluster qtree create -vserver $vserver -volume $volume -qtree "pv0$iter" -security-style unix
+        ssh -n admin@$cluster quota policy rule create -vserver $vserver -policy-name  "q_""$vserver""_pl" -volume $volume -type tree -target "pv0$iter" -disk-limit 50GB -soft-disk-limit 45GB
+done
+
+echo "creating export policy ""e_""$volume""_pl"
+ssh -n admin@$cluster vserver export-policy create -vserver $vserver -policyname "e_""$volume""_pl"
+
+ssh -n admin@$cluster vol modify -vserver $vserver $volume -snapdir-access false -snapshot-policy none -policy "e_""$volume""_pl"
+
+ssh -n admin@$cluster qtree modify -volume $volume -vserver $vserver -qtree pv0* -export-policy "e_""$volume""_pl"
+
+echo "adding rule to export policy ""e_""$volume""_pl"
+ssh -n admin@$cluster export-policy rule create -vserver $vserver -policyname "e_""$volume""_pl" -ruleindex 1 -protocol nfs -clientmatch "@""$netgroup" -rorule sys -rwrule sys -anon 65534 -superuser sys
+
+ssh -n admin@$cluster quota on -volume $volume -vserver $vserver
+
+sleep 20
+
+ssh -n admin@$cluster quota report -volume $volume -vserver $vserver
+exit
