@@ -20,6 +20,8 @@ policy_name="e_"$volume"_pl"
 echo "Please enter server FQDNs one by one."
 for ((i = 0 ; i < $server_count ; i++));
 do
+
+echo "\n Enter server $i." 
 read server_list[$i]
 
 j=`nslookup ${server_list[$i]}`
@@ -30,6 +32,7 @@ flag=`ssh admin@$cluster export-policy rule show -vserver $vserver -policyname $
 if [ "$flag" == "" ] 
 then
 ssh admin@$cluster export-policy rule create -vserver $vserver -policyname $policy_name -rorule sys -rwrule sys -superuser sys -protocol nfs -clientmatch ${server_list[$i]}
+echo "${server_list[$i]} added to the export list of $policy_name ."
 else
 echo "${server_list[$i]} is already added to the export list."
 fi
