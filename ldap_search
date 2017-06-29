@@ -1,0 +1,2 @@
+uid=$1
+ldapsearch -p 55395 -h elrcsfldap.uhc.com -x -b dc=uhc,dc=com uid=${uid}
