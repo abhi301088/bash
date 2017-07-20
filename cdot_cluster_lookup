@@ -1,0 +1,19 @@
+#!/bin/bash
+svm=$1
+flag=0
+while read vserver_list
+do
+        vserver=`echo $vserver_list | awk -F: '{print $1}'`
+        if [ $vserver == $svm ]
+        then
+                cluster=`echo $vserver_list | awk -F: '{print $2}'`
+                flag=1
+        fi
+done</home/agupta64/random_scripts/cdot_lookup/vserver_list.txt
+
+if [ $flag == 1 ]
+then
+        ssh admin@$cluster
+else
+              echo "$svm not found in the list, please check nas wiki link."
+fi
